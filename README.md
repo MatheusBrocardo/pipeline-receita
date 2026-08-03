@@ -1,15 +1,5 @@
 # CNPJ Data Pipeline (v2)
 
-[![Release](https://img.shields.io/github/v/release/caiopizzol/cnpj-data-pipeline)](https://github.com/caiopizzol/cnpj-data-pipeline/releases)
-[![Python](https://img.shields.io/badge/python-3.11+-blue)](https://www.python.org)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![codecov](https://codecov.io/gh/caiopizzol/cnpj-data-pipeline/graph/badge.svg)](https://codecov.io/gh/caiopizzol/cnpj-data-pipeline)
-
-Baixa e processa dados de empresas brasileiras da Receita Federal para PostgreSQL.
-
-> [!IMPORTANT]
-> **Novo em v1.3.2** — _A Receita Federal migrou os arquivos CNPJ para um novo repositório Nextcloud. Esta versão já suporta a nova URL e realiza downloads via WebDAV automaticamente. Nenhuma configuração adicional necessária._
-
 ## Requisitos
 
 - [uv](https://docs.astral.sh/uv/) - `brew install uv`
