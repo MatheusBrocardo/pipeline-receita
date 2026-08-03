@@ -1,0 +1,52 @@
+# CNPJ Data Pipeline
+#
+# Usage:
+#   docker compose up -d                              # Start services
+#   docker exec cnpj-pipeline python main.py --list   # List available months
+#   docker exec cnpj-pipeline python main.py          # Process latest month
+#   docker compose down                               # Stop services
+
+services:
+  pipeline:
+    build: .
+    container_name: cnpj-pipeline
+    env_file: .env
+    environment:
+      # Override DATABASE_URL for container networking
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/cnpj
+      ORACLE_HOST: ${ORACLE_HOST:-192.168.1.225}
+      ORACLE_PORT: ${ORACLE_PORT:-1521}
+      ORACLE_SERVICE: ${ORACLE_SERVICE:-ORBI}
+      ORACLE_USER: ${ORACLE_USER:-ORBI}
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD:-ADMIN4ORBI}
+      ENABLE_ORACLE: ${ENABLE_ORACLE:-true}
+      WEB_PORT: 8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./temp:/app/temp
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: cnpj-pipeline-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: cnpj
+    ports:
+      - "5435:5432"
+    volumes:
+      - cnpj_pipeline_data:/var/lib/postgresql/data
+      - ./initial.sql:/docker-entrypoint-initdb.d/initial.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  cnpj_pipeline_data:

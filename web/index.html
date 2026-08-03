@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pipeline CNPJ & Migration Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="navbar">
+            <div class="brand">
+                <div class="logo-icon">🏢</div>
+                <div>
+                    <h1>CNPJ Pipeline Dashboard</h1>
+                    <p class="subtitle">Receita Federal ➔ PostgreSQL Staging ➔ Oracle DB</p>
+                </div>
+            </div>
+            <div class="status-badge" id="global-status-badge">
+                <span class="dot"></span>
+                <span id="global-status-text">DESCONECTADO</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="dashboard-grid">
+            <!-- Cards Grid -->
+            <section class="cards-row">
+                <div class="card metric-card">
+                    <div class="card-title">Mês em Processamento</div>
+                    <div class="card-value" id="card-current-month">--</div>
+                    <div class="card-sub" id="card-last-run">Última execução: Nenhuma</div>
+                </div>
+
+                <div class="card metric-card">
+                    <div class="card-title">Progresso de Arquivos</div>
+                    <div class="card-value" id="card-files-progress">0 / 0</div>
+                    <div class="card-sub" id="card-current-file">Nenhum arquivo ativo</div>
+                </div>
+
+                <div class="card metric-card">
+                    <div class="card-title">Linhas no PostgreSQL</div>
+                    <div class="card-value Highlight-pg" id="card-pg-rows">0</div>
+                    <div class="card-sub">Lote atual Staging</div>
+                </div>
+
+                <div class="card metric-card">
+                    <div class="card-title">Linhas no Oracle DB</div>
+                    <div class="card-value highlight-oracle" id="card-oracle-rows">0</div>
+                    <div class="card-sub" id="card-oracle-table">Tabela: --</div>
+                </div>
+            </section>
+
+            <!-- Flow Stepper -->
+            <section class="card flow-card">
+                <h2>Fluxo de Execução</h2>
+                <div class="stepper">
+                    <div class="step" id="step-receita">
+                        <div class="step-num">1</div>
+                        <div class="step-info">
+                            <span class="step-name">Download Receita</span>
+                            <span class="step-desc">WebDAV Nextcloud</span>
+                        </div>
+                    </div>
+                    <div class="step-connector" id="conn-1"></div>
+                    <div class="step" id="step-postgres">
+                        <div class="step-num">2</div>
+                        <div class="step-info">
+                            <span class="step-name">PostgreSQL Staging</span>
+                            <span class="step-desc">Polars + Bulk Upsert</span>
+                        </div>
+                    </div>
+                    <div class="step-connector" id="conn-2"></div>
+                    <div class="step" id="step-oracle">
+                        <div class="step-num">3</div>
+                        <div class="step-info">
+                            <span class="step-name">Oracle DB Production</span>
+                            <span class="step-desc">Stream Server-side + Merge</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Progress Bar -->
+                <div class="progress-container">
+                    <div class="progress-header">
+                        <span id="progress-label">Aguardando execução...</span>
+                        <span id="progress-percent">0%</span>
+                    </div>
+                    <div class="progress-track">
+                        <div class="progress-bar" id="main-progress-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Zip Files Status Table -->
+            <section class="card table-card">
+                <div class="table-header">
+                    <h2>Status por Arquivo ZIP da Receita</h2>
+                    <span class="file-count-badge" id="table-files-count">0 arquivos</span>
+                </div>
+                <div class="table-container">
+                    <table class="files-table">
+                        <thead>
+                            <tr>
+                                <th>Arquivo ZIP</th>
+                                <th>Tipo de Dado</th>
+                                <th>Status</th>
+                                <th>Linhas / Erro</th>
+                            </tr>
+                        </thead>
+                        <tbody id="files-table-body">
+                            <tr>
+                                <td colspan="4" class="empty-row">Nenhum arquivo em processamento ou carregado.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Controls & Controls Column -->
+            <div class="split-row">
+                <!-- Controls Card -->
+                <section class="card control-card">
+                    <h2>Controle da Pipeline</h2>
+                    <form id="trigger-form">
+                        <div class="form-group">
+                            <label for="select-month">Selecione o Mês Disponível:</label>
+                            <select id="select-month" class="custom-select">
+                                <option value="">Mês Mais Recente (Automático)</option>
+                            </select>
+                        </div>
+                        <div class="form-group checkbox-group">
+                            <input type="checkbox" id="check-force">
+                            <label for="check-force">Forçar re-processamento (Limpar histórico)</label>
+                        </div>
+                        <button type="submit" class="btn btn-primary" id="btn-trigger">
+                            Iniciar
+                        </button>
+                    </form>
+                </section>
+
+                <!-- Live Log Terminal -->
+                <section class="card terminal-card">
+                    <div class="terminal-header">
+                        <h2>Terminal de Logs</h2>
+                        <button class="btn-sm" id="btn-clear-log">Limpar Log</button>
+                    </div>
+                    <div class="terminal-body" id="terminal-body">
+                        <div class="log-line info">[SISTEMA] Conectando ao serviço de monitoramento WebSocket...</div>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>

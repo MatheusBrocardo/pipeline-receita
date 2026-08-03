@@ -1,0 +1,27 @@
+from unittest.mock import MagicMock, patch
+import pytest
+from oracle_migrator import OracleMigrator, TABLE_SCHEMAS
+from config import Config
+
+@pytest.fixture
+def mock_config():
+    return Config(
+        database_url="postgres://user:pass@localhost:5432/db",
+        oracle_host="127.0.0.1",
+        oracle_port=1521,
+        oracle_service="ORBI",
+        oracle_user="ORBI",
+        oracle_password="password",
+    )
+
+def test_oracle_migrator_table_name(mock_config):
+    migrator = OracleMigrator(mock_config, table_prefix="SG3_")
+    assert migrator.get_oracle_table_name("empresas") == "SG3_EMPRESAS"
+    assert migrator.get_oracle_table_name("socios") == "SG3_SOCIOS"
+
+def test_build_merge_sql(mock_config):
+    migrator = OracleMigrator(mock_config, table_prefix="SG3_")
+    merge_sql = migrator.build_merge_sql("empresas")
+    assert "MERGE INTO SG3_EMPRESAS" in merge_sql
+    assert "WHEN MATCHED THEN UPDATE SET" in merge_sql
+    assert "WHEN NOT MATCHED THEN" in merge_sql
