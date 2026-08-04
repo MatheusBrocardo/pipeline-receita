@@ -17,7 +17,7 @@ from config import config
 from downloader import Downloader
 from scheduler import init_scheduler, pipeline_manager
 
-app = FastAPI(title="CNPJ Pipeline Dashboard API", version="2.0.0")
+app = FastAPI(title="CNPJ Pipeline Dashboard API", version="3.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -41,9 +41,27 @@ def startup_event():
     init_scheduler()
 
 
+from typing import List, Optional
+
 class TriggerRequest(BaseModel):
     month: Optional[str] = None
     force: bool = False
+    stages: Optional[List[str]] = None
+    oracle_tables: Optional[List[str]] = None
+
+
+TABLE_LABELS = {
+    "cnaes": "CNAEs",
+    "motivos": "Motivos",
+    "municipios": "Municípios",
+    "naturezas_juridicas": "Naturezas Jurídicas",
+    "paises": "Países",
+    "qualificacoes_socios": "Qualificações de Sócios",
+    "empresas": "Empresas",
+    "estabelecimentos": "Estabelecimentos",
+    "socios": "Sócios",
+    "dados_simples": "Dados do Simples",
+}
 
 
 @app.get("/")
@@ -72,13 +90,25 @@ def get_months():
         return {"error": str(e), "available_months": []}
 
 
+@app.get("/api/tables")
+def get_tables():
+    """List available tables for Oracle migration."""
+    tables_list = [{"name": name, "label": label} for name, label in TABLE_LABELS.items()]
+    return {"tables": tables_list}
+
+
 @app.post("/api/trigger")
 def trigger_pipeline(req: TriggerRequest):
-    """Trigger manual pipeline run for a specific month or latest."""
+    """Trigger manual pipeline run for a specific month or latest with stage/table options."""
     if pipeline_manager.status["state"] in ["DOWNLOADING", "PROCESSING_PG", "MIGRATING_ORACLE", "CHECKING"]:
         return {"status": "error", "message": "Pipeline já está em execução!"}
 
-    pipeline_manager.run_pipeline(target_month=req.month, force=req.force)
+    pipeline_manager.run_pipeline(
+        target_month=req.month,
+        force=req.force,
+        stages=req.stages,
+        oracle_tables=req.oracle_tables,
+    )
     return {"status": "ok", "message": f"Pipeline iniciado para o mês: {req.month or 'Mais recente'}"}
 
 

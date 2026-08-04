@@ -57,6 +57,20 @@ def parse_args():
     parser.add_argument("--month", "-m", type=str, help="Specific month to process (format: YYYY-MM, e.g., 2024-11)")
     parser.add_argument("--force", "-f", action="store_true", help="Force re-processing even if already processed")
     parser.add_argument("--web", "-w", action="store_true", help="Start Web Dashboard server and cyclic scheduler")
+    parser.add_argument(
+        "--stage",
+        "-s",
+        type=str,
+        choices=["all", "postgres", "oracle"],
+        default="all",
+        help="Pipeline stage to execute: 'all' (default), 'postgres', or 'oracle'",
+    )
+    parser.add_argument(
+        "--oracle-tables",
+        "-t",
+        nargs="+",
+        help="Specific tables to migrate to Oracle DB (e.g. --oracle-tables empresas estabelecimentos)",
+    )
     return parser.parse_args()
 
 def main():
@@ -83,66 +97,23 @@ def main():
         logger.error("DATABASE_URL not set")
         sys.exit(1)
 
-    db = Database(config.database_url)
+    # Determine stages
+    if args.stage == "postgres":
+        stages = ["download_pg"]
+    elif args.stage == "oracle":
+        stages = ["oracle_migration"]
+    else:
+        stages = ["download_pg", "oracle_migration"]
 
+    from scheduler import pipeline_manager
     try:
-        # Select directory
-        if args.month:
-            available = downloader.get_available_directories()
-            if args.month not in available:
-                logger.error(f"Month {args.month} not available. Use --list to see options.")
-                sys.exit(1)
-            directory = args.month
-        else:
-            directory = downloader.get_latest_directory()
-
-        # Handle --force mode
-        if args.force:
-            print(f"Force mode: clearing processed files for {directory}")
-            db.clear_processed_files(directory)
-
-        all_files = downloader.get_directory_files(directory)
-        processed = db.get_processed_files(directory)
-        pending_files = [f for f in all_files if f not in processed]
-
-        if not pending_files:
-            print("All files already processed!")
-            return
-
-        print(f"Processing {len(pending_files)} files from {directory}")
-
-        # Sort files by processing order
-        pending_files.sort(key=get_file_priority)
-
-        # Download and process files
-        file_iterator = downloader.download_files(directory, pending_files)
-        with tqdm(file_iterator, total=len(pending_files), desc="Processing", unit="file") as pbar:
-            for csv_path, zip_filename in pbar:
-                pbar.set_postfix_str(csv_path.name[:30])
-                try:
-                    rows = 0
-                    for batch, table_name, columns in process_file(csv_path, config.batch_size):
-                        db.bulk_upsert(batch, table_name, columns)
-                        rows += len(batch)
-                        pbar.set_postfix_str(f"{csv_path.name[:20]} {rows:,} rows")
-
-                    db.mark_processed(directory, zip_filename)
-
-                except Exception as e:
-                    logger.error(f"Error: {csv_path.name}: {e}")
-
-                finally:
-                    if csv_path.exists() and not config.keep_files:
-                        csv_path.unlink()
-
-        print("Done!")
-
-    except Exception as e:
-        logger.error(f"Failed: {e}")
-        sys.exit(1)
-
+        pipeline_manager._execute_pipeline(
+            target_month=args.month,
+            force=args.force,
+            stages=stages,
+            oracle_tables=args.oracle_tables,
+        )
     finally:
-        db.disconnect()
         downloader.cleanup()
 
 if __name__ == "__main__":

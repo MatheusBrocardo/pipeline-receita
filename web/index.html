@@ -14,19 +14,46 @@
 </head>
 
 <body>
-    <div class="app-container">
+    <!-- Login Screen -->
+    <div class="login-wrapper" id="login-screen">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-icon">🔐</div>
+                <h2>Acesso ao Dashboard</h2>
+                <p>CNPJ Pipeline & Migration Manager</p>
+            </div>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="login-user">Usuário</label>
+                    <input type="text" id="login-user" class="custom-input" placeholder="Digite seu usuário" required autocomplete="username">
+                </div>
+                <div class="form-group">
+                    <label for="login-pass">Senha</label>
+                    <input type="password" id="login-pass" class="custom-input" placeholder="Digite sua senha" required autocomplete="current-password">
+                </div>
+                <div id="login-error" class="login-error-msg"></div>
+                <button type="submit" class="btn btn-primary btn-block">Entrar no Sistema</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- App Dashboard Container (Full Screen) -->
+    <div class="app-container" id="app-dashboard" style="display: none;">
         <!-- Header -->
         <header class="navbar">
             <div class="brand">
                 <div class="logo-icon">🏢</div>
                 <div>
                     <h1>CNPJ Pipeline Dashboard</h1>
-                    <p class="subtitle">Receita Federal ➔ PostgreSQL Staging ➔ Oracle DB</p>
+                    <p class="subtitle">Receita Federal ➔ PostgreSQL ➔ Oracle DB</p>
                 </div>
             </div>
-            <div class="status-badge" id="global-status-badge">
-                <span class="dot"></span>
-                <span id="global-status-text">DESCONECTADO</span>
+            <div class="navbar-right">
+                <div class="status-badge" id="global-status-badge">
+                    <span class="dot"></span>
+                    <span id="global-status-text">DESCONECTADO</span>
+                </div>
+                <button id="btn-logout" class="btn-logout">Sair 🚪</button>
             </div>
         </header>
 
@@ -48,7 +75,7 @@
 
                 <div class="card metric-card">
                     <div class="card-title">Linhas no PostgreSQL</div>
-                    <div class="card-value Highlight-pg" id="card-pg-rows">0</div>
+                    <div class="card-value highlight-pg" id="card-pg-rows">0</div>
                     <div class="card-sub">Lote atual Staging</div>
                 </div>
 
@@ -67,23 +94,23 @@
                         <div class="step-num">1</div>
                         <div class="step-info">
                             <span class="step-name">Download Receita</span>
-                            <span class="step-desc">WebDAV Nextcloud</span>
+                            <!-- <span class="step-desc">WebDAV Nextcloud</span> -->
                         </div>
                     </div>
                     <div class="step-connector" id="conn-1"></div>
                     <div class="step" id="step-postgres">
                         <div class="step-num">2</div>
                         <div class="step-info">
-                            <span class="step-name">PostgreSQL Staging</span>
-                            <span class="step-desc">Polars + Bulk Upsert</span>
+                            <span class="step-name">PostgreSQL/span>
+                            <!-- <span class="step-desc">Polars + Bulk Upsert</span> -->
                         </div>
                     </div>
                     <div class="step-connector" id="conn-2"></div>
                     <div class="step" id="step-oracle">
                         <div class="step-num">3</div>
                         <div class="step-info">
-                            <span class="step-name">Oracle DB Production</span>
-                            <span class="step-desc">Stream Server-side + Merge</span>
+                            <span class="step-name">Oracle</span>
+                            <!-- <span class="step-desc">Stream Server-side + Merge</span> -->
                         </div>
                     </div>
                 </div>
@@ -125,7 +152,7 @@
                 </div>
             </section>
 
-            <!-- Controls & Controls Column -->
+            <!-- Controls & Live Log Terminal -->
             <div class="split-row">
                 <!-- Controls Card -->
                 <section class="card control-card">
@@ -137,12 +164,37 @@
                                 <option value="">Mês Mais Recente (Automático)</option>
                             </select>
                         </div>
+
+                        <div class="form-group">
+                            <label for="select-stage">Modo / Etapa de Execução:</label>
+                            <select id="select-stage" class="custom-select">
+                                <option value="all">Fluxo Completo (Download + Postgres + Oracle)</option>
+                                <option value="postgres">Etapa 1: Apenas Download & PostgreSQL Staging</option>
+                                <option value="oracle">Etapa 2: Apenas Migração Oracle DB</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group" id="oracle-tables-wrapper">
+                            <div class="tables-header-row">
+                                <label>Tabelas para Migração Oracle:</label>
+                                <div class="tables-actions">
+                                    <button type="button" class="btn-link" id="btn-select-all-tables">Marcar Todas</button>
+                                    <span class="divider">|</span>
+                                    <button type="button" class="btn-link" id="btn-unselect-all-tables">Desmarcar Todas</button>
+                                </div>
+                            </div>
+                            <div class="tables-grid" id="tables-grid">
+                                <!-- Dynamic checkboxes -->
+                            </div>
+                        </div>
+
                         <div class="form-group checkbox-group">
                             <input type="checkbox" id="check-force">
                             <label for="check-force">Forçar re-processamento (Limpar histórico)</label>
                         </div>
-                        <button type="submit" class="btn btn-primary" id="btn-trigger">
-                            Iniciar
+
+                        <button type="submit" class="btn btn-primary btn-block" id="btn-trigger">
+                            Iniciar Execução
                         </button>
                     </form>
                 </section>

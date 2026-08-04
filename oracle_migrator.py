@@ -14,9 +14,12 @@ from config import Config
 logger = logging.getLogger(__name__)
 
 
-oracledb.init_oracle_client(
-    lib_dir=os.environ["ORACLE_HOME"]
-)
+oracle_home = os.environ.get("ORACLE_HOME")
+if oracle_home:
+    try:
+        oracledb.init_oracle_client(lib_dir=oracle_home)
+    except Exception as _e:
+        logger.debug(f"init_oracle_client exception: {_e}")
 
 # Map table columns and primary keys for Oracle DDL & MERGE statements
 TABLE_SCHEMAS: Dict[str, Dict] = {
@@ -171,18 +174,21 @@ TABLE_SCHEMAS: Dict[str, Dict] = {
             "faixa_etaria",
         ],
         "pk": ["cnpj_basico", "identificador_de_socio", "cnpj_cpf_do_socio"],
+        "column_map": {
+            "qualificacao_do_representante_legal": "quali_do_rep_legal"
+        },
         "oracle_types": {
-            "cnpj_basico": "VARCHAR2(8)",
-            "identificador_de_socio": "VARCHAR2(1)",
+            "cnpj_basico": "VARCHAR2(500)",
+            "identificador_de_socio": "VARCHAR2(500)",
             "nome_socio": "VARCHAR2(500)",
-            "cnpj_cpf_do_socio": "VARCHAR2(14)",
-            "qualificacao_do_socio": "VARCHAR2(2)",
+            "cnpj_cpf_do_socio": "VARCHAR2(500)",
+            "qualificacao_do_socio": "VARCHAR2(500)",
             "data_entrada_sociedade": "DATE",
             "pais": "VARCHAR2(3)",
-            "representante_legal": "VARCHAR2(11)",
+            "representante_legal": "VARCHAR2(500)",
             "nome_do_representante": "VARCHAR2(500)",
-            "qualificacao_do_representante_legal": "VARCHAR2(2)",
-            "faixa_etaria": "VARCHAR2(1)",
+            "quali_do_rep_legal": "VARCHAR2(500)",
+            "faixa_etaria": "VARCHAR2(500)",
         },
     },
     "dados_simples": {
@@ -256,8 +262,12 @@ class OracleMigrator:
         """Get formatted Oracle table name."""
         return f"{self.table_prefix}{pg_table.upper()}"
 
-    def ensure_oracle_tables(self):
-        """Ensure all required tables and tracking table exist in Oracle DB."""
+    def get_available_tables(self) -> list:
+        """Get list of available table names for Oracle migration."""
+        return list(TABLE_SCHEMAS.keys())
+
+    def ensure_oracle_tables(self, selected_tables: Optional[list] = None):
+        """Ensure required tables and tracking table exist in Oracle DB."""
         self.connect_oracle()
         cursor = self.oracle_conn.cursor()
 
@@ -283,7 +293,11 @@ class OracleMigrator:
             logger.debug(f"Tracking table check: {e}")
 
         # 2. Create data tables
-        for pg_table, schema in TABLE_SCHEMAS.items():
+        target_tables = TABLE_SCHEMAS.items()
+        if selected_tables is not None:
+            target_tables = [(t, schema) for t, schema in TABLE_SCHEMAS.items() if t in selected_tables]
+
+        for pg_table, schema in target_tables:
             oracle_table = self.get_oracle_table_name(pg_table)
             cols_ddl = []
             for col, otype in schema["oracle_types"].items():
@@ -349,8 +363,9 @@ class OracleMigrator:
         """Build dynamic MERGE INTO SQL statement for Oracle."""
         schema = TABLE_SCHEMAS[pg_table]
         oracle_table = self.get_oracle_table_name(pg_table)
-        cols = [c.upper() for c in schema["columns"]]
-        pks = [pk.upper() for pk in schema["pk"]]
+        col_map = schema.get("column_map", {})
+        cols = [col_map.get(c, c).upper() for c in schema["columns"]]
+        pks = [col_map.get(pk, pk).upper() for pk in schema["pk"]]
         non_pks = [c for c in cols if c not in pks]
 
         select_cols = ", ".join([f":{i+1} AS {col}" for i, col in enumerate(cols)])

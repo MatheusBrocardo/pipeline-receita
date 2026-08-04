@@ -1,4 +1,16 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // Auth Credentials
+    const AUTH_USER = 'admin';
+    const AUTH_PASS = 'Gr4n7#0rB1';
+
+    const loginScreen = document.getElementById('login-screen');
+    const appDashboard = document.getElementById('app-dashboard');
+    const loginForm = document.getElementById('login-form');
+    const loginUser = document.getElementById('login-user');
+    const loginPass = document.getElementById('login-pass');
+    const loginError = document.getElementById('login-error');
+    const btnLogout = document.getElementById('btn-logout');
+
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${wsProtocol}//${window.location.host}/ws/progress`;
 
@@ -23,6 +35,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const mainProgressBar = document.getElementById('main-progress-bar');
 
     const selectMonth = document.getElementById('select-month');
+    const selectStage = document.getElementById('select-stage');
+    const oracleTablesWrapper = document.getElementById('oracle-tables-wrapper');
+    const tablesGrid = document.getElementById('tables-grid');
+    const btnSelectAll = document.getElementById('btn-select-all-tables');
+    const btnUnselectAll = document.getElementById('btn-unselect-all-tables');
     const checkForce = document.getElementById('check-force');
     const triggerForm = document.getElementById('trigger-form');
     const btnTrigger = document.getElementById('btn-trigger');
@@ -32,6 +49,52 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let ws = null;
 
+    // --- Authentication Logic ---
+    function checkAuth() {
+        const isAuthenticated = sessionStorage.getItem('cnpj_dashboard_auth') === 'true';
+        if (isAuthenticated) {
+            loginScreen.style.display = 'none';
+            appDashboard.style.display = 'block';
+            initDashboard();
+        } else {
+            loginScreen.style.display = 'flex';
+            appDashboard.style.display = 'none';
+        }
+    }
+
+    loginForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const user = loginUser.value.trim();
+        const pass = loginPass.value.trim();
+
+        if (user === AUTH_USER && pass === AUTH_PASS) {
+            sessionStorage.setItem('cnpj_dashboard_auth', 'true');
+            loginError.style.display = 'none';
+            checkAuth();
+        } else {
+            loginError.textContent = 'Usuário ou senha incorretos.';
+            loginError.style.display = 'block';
+        }
+    });
+
+    btnLogout.addEventListener('click', () => {
+        sessionStorage.removeItem('cnpj_dashboard_auth');
+        if (ws) {
+            ws.close();
+            ws = null;
+        }
+        checkAuth();
+    });
+
+    function initDashboard() {
+        loadMonths();
+        loadTables();
+        if (!ws) {
+            connectWS();
+        }
+    }
+
+    // --- Dashboard Utilities ---
     function appendLog(message, type = 'INFO') {
         const line = document.createElement('div');
         line.className = `log-line ${type}`;
@@ -40,9 +103,32 @@ document.addEventListener('DOMContentLoaded', () => {
         terminalBody.scrollTop = terminalBody.scrollHeight;
     }
 
-    btnClearLog.addEventListener('click', () => {
-        terminalBody.innerHTML = '';
-    });
+    if (btnClearLog) {
+        btnClearLog.addEventListener('click', () => {
+            terminalBody.innerHTML = '';
+        });
+    }
+
+    function updateStageVisibility() {
+        if (selectStage.value === 'postgres') {
+            oracleTablesWrapper.style.display = 'none';
+        } else {
+            oracleTablesWrapper.style.display = 'block';
+        }
+    }
+
+    if (selectStage) {
+        selectStage.addEventListener('change', updateStageVisibility);
+    }
+
+    if (btnSelectAll && btnUnselectAll) {
+        btnSelectAll.addEventListener('click', () => {
+            document.querySelectorAll('input[name="oracle_table"]').forEach(cb => cb.checked = true);
+        });
+        btnUnselectAll.addEventListener('click', () => {
+            document.querySelectorAll('input[name="oracle_table"]').forEach(cb => cb.checked = false);
+        });
+    }
 
     // Load available months
     async function loadMonths() {
@@ -60,6 +146,28 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (e) {
             console.error('Erro ao carregar meses:', e);
+        }
+    }
+
+    // Load available tables
+    async function loadTables() {
+        try {
+            const res = await fetch('/api/tables');
+            const data = await res.json();
+            if (data.tables && data.tables.length > 0) {
+                tablesGrid.innerHTML = '';
+                data.tables.forEach(t => {
+                    const item = document.createElement('label');
+                    item.className = 'table-checkbox-item';
+                    item.innerHTML = `
+                        <input type="checkbox" name="oracle_table" value="${t.name}" checked>
+                        <span>${t.label}</span>
+                    `;
+                    tablesGrid.appendChild(item);
+                });
+            }
+        } catch (e) {
+            console.error('Erro ao carregar tabelas:', e);
         }
     }
 
@@ -86,7 +194,9 @@ document.addEventListener('DOMContentLoaded', () => {
             elStatusText.textContent = 'DESCONECTADO';
             elBadge.className = 'status-badge';
             appendLog('[WS] Conexão encerrada. Reconectando em 3s...');
-            setTimeout(connectWS, 3000);
+            if (sessionStorage.getItem('cnpj_dashboard_auth') === 'true') {
+                setTimeout(connectWS, 3000);
+            }
         };
     }
 
@@ -231,13 +341,34 @@ document.addEventListener('DOMContentLoaded', () => {
         const selectedMonth = selectMonth.value;
         const force = checkForce.checked;
 
+        const stageVal = selectStage ? selectStage.value : 'all';
+        let stagesPayload = null;
+        if (stageVal === 'postgres') {
+            stagesPayload = ['download_pg'];
+        } else if (stageVal === 'oracle') {
+            stagesPayload = ['oracle_migration'];
+        } else {
+            stagesPayload = ['download_pg', 'oracle_migration'];
+        }
+
+        let oracleTables = null;
+        if (stageVal !== 'postgres') {
+            const checked = document.querySelectorAll('input[name="oracle_table"]:checked');
+            oracleTables = Array.from(checked).map(cb => cb.value);
+        }
+
         btnTrigger.disabled = true;
 
         try {
             const res = await fetch('/api/trigger', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ month: selectedMonth || null, force: force })
+                body: JSON.stringify({
+                    month: selectedMonth || null,
+                    force: force,
+                    stages: stagesPayload,
+                    oracle_tables: oracleTables,
+                })
             });
 
             const data = await res.json();
@@ -248,6 +379,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    loadMonths();
-    connectWS();
+    // Start App Check
+    checkAuth();
 });

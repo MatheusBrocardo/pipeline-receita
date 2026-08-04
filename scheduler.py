@@ -103,16 +103,33 @@ class PipelineManager:
             except Exception:
                 pass
 
-    def run_pipeline(self, target_month: Optional[str] = None, force: bool = False):
-        """Execute full pipeline workflow in background thread."""
+    def run_pipeline(
+        self,
+        target_month: Optional[str] = None,
+        force: bool = False,
+        stages: Optional[List[str]] = None,
+        oracle_tables: Optional[List[str]] = None,
+    ):
+        """Execute pipeline workflow in background thread with optional stage/table filtering."""
         thread = threading.Thread(
-            target=self._execute_pipeline, args=(target_month, force), daemon=True
+            target=self._execute_pipeline,
+            args=(target_month, force, stages, oracle_tables),
+            daemon=True,
         )
         thread.start()
 
-    def _execute_pipeline(self, target_month: Optional[str], force: bool):
+    def _execute_pipeline(
+        self,
+        target_month: Optional[str],
+        force: bool,
+        stages: Optional[List[str]] = None,
+        oracle_tables: Optional[List[str]] = None,
+    ):
         """Internal execution method."""
         downloader = Downloader(self.config)
+
+        # Normalize stages
+        active_stages = set(stages) if stages else {"download_pg", "oracle_migration"}
 
         try:
             # 1. Resolve month
@@ -125,111 +142,123 @@ class PipelineManager:
             else:
                 directory = downloader.get_latest_directory()
 
-            self.log(f"Iniciando pipeline para o mês: {directory}")
+            self.log(f"Iniciando pipeline para o mês: {directory} (Etapas: {', '.join(active_stages)})")
             self.update_status(current_month=directory)
 
             db = Database(self.config.database_url)
 
-            if force:
-                self.log(f"Modo força ativado. Limpando registros anteriores de {directory}")
-                db.clear_processed_files(directory)
+            # 2. Process Postgres Staging (if download_pg stage is active)
+            if "download_pg" in active_stages:
+                if force:
+                    self.log(f"Modo força ativado. Limpando registros anteriores de {directory}")
+                    db.clear_processed_files(directory)
 
-            all_files = downloader.get_directory_files(directory)
-            processed_pg = db.get_processed_files(directory)
-            pending_files = [f for f in all_files if f not in processed_pg]
+                all_files = downloader.get_directory_files(directory)
+                processed_pg = db.get_processed_files(directory)
+                pending_files = [f for f in all_files if f not in processed_pg]
 
-            # Build initial per-file status dictionary
-            file_statuses = {}
-            for filename in all_files:
-                file_type_raw = get_file_type(filename)
-                table_label = FILE_TYPE_TO_TABLE.get(file_type_raw, file_type_raw)
-                file_statuses[filename] = {
-                    "filename": filename,
-                    "file_type": table_label,
-                    "status": "COMPLETED" if filename in processed_pg else "PENDING",
-                    "rows": 0,
-                    "error": None,
-                }
-
-            self.update_status(
-                current_month=directory,
-                files_total=len(all_files),
-                file_statuses=file_statuses,
-            )
-
-            # 2. Process Postgres Staging
-            if pending_files:
-                self.log(f"Falta processar {len(pending_files)} arquivos no PostgreSQL staging...")
-                pending_files.sort(key=get_file_priority)
+                # Build initial per-file status dictionary
+                file_statuses = {}
+                for filename in all_files:
+                    file_type_raw = get_file_type(filename)
+                    table_label = FILE_TYPE_TO_TABLE.get(file_type_raw, file_type_raw)
+                    file_statuses[filename] = {
+                        "filename": filename,
+                        "file_type": table_label,
+                        "status": "COMPLETED" if filename in processed_pg else "PENDING",
+                        "rows": 0,
+                        "error": None,
+                    }
 
                 self.update_status(
-                    state="DOWNLOADING",
-                    files_processed=len(all_files) - len(pending_files),
+                    current_month=directory,
+                    files_total=len(all_files),
+                    file_statuses=file_statuses,
                 )
 
-                def on_download_progress(fname, downloaded, total, pct):
-                    info = file_statuses.get(fname)
-                    if info:
-                        info["download_pct"] = pct
-                        info["downloaded_bytes"] = downloaded
-                        info["total_bytes"] = total
-                        if info["status"] not in ["PROCESSING_PG", "COMPLETED", "ERROR"]:
-                            info["status"] = "DOWNLOADING"
-                        self.update_status(file_statuses=file_statuses)
-
-                file_iterator = downloader.download_files(
-                    directory, pending_files, progress_callback=on_download_progress
-                )
-                for idx, (csv_path, zip_filename) in enumerate(file_iterator, 1):
-                    file_info = file_statuses.get(zip_filename, {})
-                    file_info["status"] = "PROCESSING_PG"
-                    file_info["download_pct"] = 100.0
+                if pending_files:
+                    self.log(f"Falta processar {len(pending_files)} arquivos no PostgreSQL staging...")
+                    pending_files.sort(key=get_file_priority)
 
                     self.update_status(
-                        state="PROCESSING_PG",
-                        current_file=zip_filename,
-                        files_processed=(len(all_files) - len(pending_files)) + idx - 1,
-                        file_statuses=file_statuses,
+                        state="DOWNLOADING",
+                        files_processed=len(all_files) - len(pending_files),
                     )
-                    self.log(f"Lendo e inserindo no PostgreSQL: {zip_filename}")
 
-                    try:
-                        rows_file = 0
-                        for batch, table_name, columns in process_file(csv_path, self.config.batch_size):
-                            db.bulk_upsert(batch, table_name, columns)
-                            rows_file += len(batch)
-                            file_info["rows"] = rows_file
-                            self.update_status(current_rows=rows_file, file_statuses=file_statuses)
+                    def on_download_progress(fname, downloaded, total, pct):
+                        info = file_statuses.get(fname)
+                        if info:
+                            info["download_pct"] = pct
+                            info["downloaded_bytes"] = downloaded
+                            info["total_bytes"] = total
+                            if info["status"] not in ["PROCESSING_PG", "COMPLETED", "ERROR"]:
+                                info["status"] = "DOWNLOADING"
+                            self.update_status(file_statuses=file_statuses)
 
-                        db.mark_processed(directory, zip_filename)
-                        file_info["status"] = "COMPLETED"
-                        self.log(f"Concluído PG {zip_filename}: {rows_file:,} registros.")
-                    except Exception as file_err:
-                        file_info["status"] = "ERROR"
-                        file_info["error"] = str(file_err)
-                        self.log(f"Erro ao processar arquivo {zip_filename}: {file_err}", level="ERROR")
-                    finally:
-                        self.update_status(file_statuses=file_statuses)
-                        if csv_path.exists() and not self.config.keep_files:
-                            csv_path.unlink()
+                    file_iterator = downloader.download_files(
+                        directory, pending_files, progress_callback=on_download_progress
+                    )
+                    for idx, (csv_path, zip_filename) in enumerate(file_iterator, 1):
+                        file_info = file_statuses.get(zip_filename, {})
+                        file_info["status"] = "PROCESSING_PG"
+                        file_info["download_pct"] = 100.0
 
-                self.update_status(files_processed=len(all_files))
+                        self.update_status(
+                            state="PROCESSING_PG",
+                            current_file=zip_filename,
+                            files_processed=(len(all_files) - len(pending_files)) + idx - 1,
+                            file_statuses=file_statuses,
+                        )
+                        self.log(f"Lendo e inserindo no PostgreSQL: {zip_filename}")
+
+                        try:
+                            rows_file = 0
+                            for batch, table_name, columns in process_file(csv_path, self.config.batch_size):
+                                db.bulk_upsert(batch, table_name, columns)
+                                rows_file += len(batch)
+                                file_info["rows"] = rows_file
+                                self.update_status(current_rows=rows_file, file_statuses=file_statuses)
+
+                            db.mark_processed(directory, zip_filename)
+                            file_info["status"] = "COMPLETED"
+                            self.log(f"Concluído PG {zip_filename}: {rows_file:,} registros.")
+                        except Exception as file_err:
+                            file_info["status"] = "ERROR"
+                            file_info["error"] = str(file_err)
+                            self.log(f"Erro ao processar arquivo {zip_filename}: {file_err}", level="ERROR")
+                        finally:
+                            self.update_status(file_statuses=file_statuses)
+                            if csv_path.exists() and not self.config.keep_files:
+                                csv_path.unlink()
+
+                    self.update_status(files_processed=len(all_files))
+                else:
+                    self.log("Todos os arquivos já estão carregados no PostgreSQL staging.")
             else:
-                self.log("Todos os arquivos já estão carregados no PostgreSQL staging.")
+                self.log("Etapa Download/Postgres Staging ignorada por configuração de etapa.")
 
-            # 3. Process Oracle Migration
-            if self.config.enable_oracle:
+            # 3. Process Oracle Migration (if oracle_migration stage is active and oracle is enabled)
+            if "oracle_migration" in active_stages and (self.config.enable_oracle or stages is not None):
                 self.log("Iniciando migração para o Oracle DB...")
                 self.update_status(state="MIGRATING_ORACLE", oracle_rows=0)
 
                 oracle_migrator = OracleMigrator(self.config)
-                oracle_migrator.ensure_oracle_tables()
+                
+                # Determine target tables
+                all_pg_tables = list(FILE_TYPE_TO_TABLE.values())
+                if oracle_tables:
+                    target_tables = [t for t in all_pg_tables if t in oracle_tables]
+                else:
+                    target_tables = all_pg_tables
 
-                # Determine PG tables to stream
+                self.log(f"Tabelas selecionadas para migração Oracle: {', '.join(target_tables)}")
+                oracle_migrator.ensure_oracle_tables(selected_tables=target_tables)
+
+                # Stream selected PG tables
                 db.connect()
                 for file_type in PROCESSING_ORDER:
                     pg_table = FILE_TYPE_TO_TABLE.get(file_type)
-                    if not pg_table:
+                    if not pg_table or pg_table not in target_tables:
                         continue
 
                     self.update_status(oracle_current_table=pg_table)
