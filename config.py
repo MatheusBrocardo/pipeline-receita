@@ -53,7 +53,7 @@ class Config:
             oracle_host=os.getenv("ORACLE_HOST", "192.168.1.225"),
             oracle_port=int(os.getenv("ORACLE_PORT", "1521")),
             oracle_service=os.getenv("ORACLE_SERVICE", "ORBI"),
-            oracle_user=os.getenv("ORACLE_USER", "ORBI"),
+            oracle_user=os.getenv("ORACLE_USER", ""),
             oracle_password=os.getenv("ORACLE_PASSWORD", ""),
             oracle_batch_size=int(os.getenv("ORACLE_BATCH_SIZE", "10000")),
             enable_oracle=os.getenv("ENABLE_ORACLE", "true").lower() == "true",
