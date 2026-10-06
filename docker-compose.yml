@@ -14,7 +14,7 @@ services:
     environment:
       # Override DATABASE_URL for container networking
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/cnpj
-      ORACLE_HOST: ${ORACLE_HOST:-192.168.1.225}
+      ORACLE_HOST: ${ORACLE_HOST:-}
       ORACLE_PORT: ${ORACLE_PORT:-1521}
       ORACLE_SERVICE: ${ORACLE_SERVICE:-}
       ORACLE_USER: ${ORACLE_USER:-}
